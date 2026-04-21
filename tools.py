@@ -1,4 +1,9 @@
-"""Deterministic task-list builder + the Pydantic schema the planner extracts."""
+"""Deterministic task-list builder + the Pydantic schema for TTO field extraction.
+
+TTOFields is used with Strands structured_output to extract checklist fields
+from ServiceNow work notes. build_tto_task_list is called directly by Python
+(not via LLM tool call) to expand templates into workflow tasks.
+"""
 
 from __future__ import annotations
 
@@ -10,11 +15,11 @@ REGISTRY: dict[str, list[str]] = {}
 
 
 class TTOFields(BaseModel):
-    """Fields the planner LLM extracts from the ServiceNow work note.
+    """Fields extracted from the ServiceNow work note via structured_output.
 
     Required fields (business_application_ci_id, uai) have no default, which
-    forces structured_output to run the ServiceNow tool calls: the model
-    cannot produce a schema-valid object without real values.
+    forces the LLM to extract real values from the work notes — Pydantic
+    validation will reject empty or missing required fields.
     """
 
     business_application_ci_id: str = Field(

@@ -1,16 +1,17 @@
-"""A2A server entrypoint: three specialist agents chained via Python.
+"""A2A server entrypoint: specialist agents chained via Python.
 
-Architecture (Option B — Python-chained specialist agents):
+Architecture:
 
     A2A Agent (one skill)  ->  validate_tto_checklist(project_task_number)
                                    |
-                                   +-- Planner Agent (LLM)
-                                   |       tools = [servicenow_mcp_tools...,
-                                   |                build_tto_task_list]
-                                   |       - calls servicenow_project_task_detail
-                                   |       - calls build_tto_task_list(fields)
-                                   |       deliverable: the exact list[dict]
-                                   |       produced by build_tto_task_list
+                                   +-- Fetcher Agent (LLM, two calls)
+                                   |       tools = [servicenow_mcp_tools]
+                                   |       Call 1: fetch project task (tool runs)
+                                   |       Call 2: structured_output=TTOFields
+                                   |       → returns validated TTOFields
+                                   |
+                                   +-- Python (no LLM)
+                                   |       tasks = build_tto_task_list(fields)
                                    |
                                    +-- Runner Agent (tool carrier)
                                    |       tools = [*all_mcp_tools, workflow]
@@ -22,15 +23,13 @@ Architecture (Option B — Python-chained specialist agents):
                                            turns the raw per-task results
                                            into a human-readable markdown report
 
-Every handoff between agents carries REAL Python objects (TTOFields, list[dict],
-dict state). No LLM ever re-serializes structured data in a prompt string,
-which is where previous designs broke.
-
-The planner's task list is captured out-of-band: `build_tto_task_list` is
-re-wrapped as a per-request @tool that stashes its output into a dict the
-enclosing Python function owns. That way the LLM MUST call the tool to
-finish its job, and Python gets the exact return value back — not a
-paraphrase.
+Key design:
+- Fetcher uses two LLM calls: first with tools to fetch, second with
+  structured_output to extract. The conversation context carries the
+  work_notes between calls.
+- structured_output ensures Pydantic validation of TTOFields.
+- build_tto_task_list is called directly by Python — no tool wrapper needed.
+- Every handoff between agents is typed Python objects.
 """
 
 from __future__ import annotations
@@ -52,6 +51,8 @@ from . import tools as tools_module
 from .mcp_sessions import open_sessions
 from .settings import Settings
 from .tools import TTOFields, build_tto_task_list
+import litellm
+from strands.models.litellm import LiteLLMModel
 
 log = logging.getLogger(__name__)
 
@@ -61,19 +62,16 @@ WORKFLOW_DIR = Path(
 TERMINAL_STATES = {"completed", "error"}
 
 
-PLANNER_PROMPT = """
-You are the TTO Planner. Your single deliverable is a task list produced by
-calling `build_tto_task_list`. Follow these steps in order, every time:
+FETCHER_PROMPT = """
+You are the TTO Fetcher. You retrieve ServiceNow project task details and
+extract TTO checklist fields from the work notes.
 
-STEP 1 — Fetch the record.
-Call `servicenow_project_task_detail` with the project task number you are
-given (format 'GEVPRJTASK...........'). Do not answer from memory and do not
-use any other ServiceNow tool for this step.
+When asked to fetch a project task:
+1. Call `servicenow_project_task_detail` with the project task number
+   (format 'GEVPRJTASK...........'). Do not answer from memory.
+2. Return the complete work_notes content so it can be parsed.
 
-STEP 2 — Parse the work notes.
-The checklist lives in the `work_notes` field of the response. It contains
-lines like:
-
+The work_notes typically contain lines like:
     App CI ID: 1101672345
     UAI: uai3071168
     Box link: https://...
@@ -82,25 +80,12 @@ lines like:
     Application Environment CI: 1101672999
     Used cloud services: ALB, ECR, ECS, Postgres, KMS, S3, IAM
 
-Extract these TTO fields:
-  - business_application_ci_id  (required) — the "App CI ID" value, a numeric
-    CMDB id from INSIDE the work notes. It is NEVER the project task number
-    (GEVPRJTASK...). If you are about to pass "GEVPRJTASK..." here, stop and
-    re-parse.
-  - uai                         (required) — e.g. "uai3071168"
-  - box_link, github_link, confluence_link, application_environment_ci
-  - cloud_services — parse "ALB, ECR, …" into ["ALB","ECR",…]
-Missing optional fields MUST be null. Never invent, never copy the project
-task number.
-
-STEP 3 — Build the task list.
-Call `build_tto_task_list` EXACTLY ONCE, passing a `fields` argument that
-matches the TTOFields schema. The tool's return value is your deliverable.
-Do not modify it, do not restate it.
-
-STEP 4 — Acknowledge.
-Reply with a single short sentence confirming you called build_tto_task_list.
-Do not re-emit the task list in text.
+Important distinctions:
+- business_application_ci_id is the "App CI ID" — a numeric CMDB id found
+  INSIDE the work notes. It is NEVER the project task number (GEVPRJTASK...).
+- uai is the Unique Application Identifier, e.g. "uai3071168".
+- cloud_services should be parsed as a list: ["ALB", "ECR", "ECS", ...].
+- Missing optional fields must be null, never invented.
 """.strip()
 
 
@@ -209,6 +194,16 @@ def main() -> None:
 
     settings = Settings()
 
+    litellm.ssl_verify = False
+    llm_model = LiteLLMModel(
+      client_args={
+        "api_key": settings.lite_llm_api_key,
+        "api_base": settings.litellm_host,
+        "use_litellm_proxy": True,
+      },
+      model_id=settings.model
+    )
+
     with ExitStack() as stack:
         tools_by_source, registry = open_sessions(settings, stack)
         tools_module.REGISTRY = registry
@@ -223,7 +218,7 @@ def main() -> None:
         # never called for reasoning.
         runner = Agent(
             name="TTO Runner",
-            model=settings.model,
+            model=llm_model,
             system_prompt=RUNNER_PROMPT,
             tools=[*all_mcp_tools, workflow],
         )
@@ -231,7 +226,7 @@ def main() -> None:
         # Stateless narrative writer. Reused across requests.
         report_agent = Agent(
             name="TTO Report",
-            model=settings.model,
+            model=llm_model,
             system_prompt=REPORT_PROMPT,
             tools=[],
         )
@@ -254,60 +249,63 @@ def main() -> None:
                   "raw_state": dict,      # full workflow state for audit
                 }
             """
-            # Per-request stash so Python can read the exact list[dict] that
-            # build_tto_task_list produced. The planner LLM is forced to invoke
-            # this tool to finish its job (see PLANNER_PROMPT).
-            captured: dict[str, Any] = {}
-
-            @tool
-            def build_tto_task_list_tool(fields: TTOFields) -> list[dict]:
-                """Expand the static TTO templates into the workflow tasks list.
-
-                Call this EXACTLY ONCE after extracting TTO fields from the
-                ServiceNow work notes. The `fields` argument must match the
-                TTOFields schema. The returned list is the planner's final
-                deliverable; do not re-emit it in text.
-                """
-                result = build_tto_task_list(fields)
-                captured["fields"] = fields
-                captured["tasks"] = result
-                return result
-
-            # Fresh planner per request — clean conversation state, and the
-            # stashing tool is pinned to this request's `captured` dict.
-            planner = Agent(
-                name="TTO Planner",
-                model=settings.model,
-                system_prompt=PLANNER_PROMPT,
-                tools=[*servicenow_tools, build_tto_task_list_tool],
+            # Fresh fetcher per request — clean conversation state.
+            fetcher = Agent(
+                name="TTO Fetcher",
+                model=llm_model,
+                system_prompt=FETCHER_PROMPT,
+                tools=servicenow_tools,
             )
 
-            planner(
-                f"Validate the TTO checklist for project task "
-                f"'{project_task_number}'. Follow your steps 1-4."
+            # Call 1: Fetch the project task (tools run, work_notes land in context)
+            log.info("Fetching project task %s from ServiceNow...", project_task_number)
+            fetch_response = fetcher(
+                f"Fetch the project task '{project_task_number}' using "
+                f"servicenow_project_task_detail and show me the complete work_notes."
             )
 
-            tasks = captured.get("tasks")
-            fields: TTOFields | None = captured.get("fields")
-            if not tasks or fields is None:
+            # Sanity check: ensure we got something back
+            fetch_text = str(fetch_response)
+            if not fetch_text or len(fetch_text) < 50:
                 raise RuntimeError(
-                    f"Planner finished without calling build_tto_task_list for "
-                    f"project task {project_task_number}. No task list produced."
+                    f"Fetcher returned insufficient data for project task "
+                    f"{project_task_number}. Response: {fetch_text[:200]}"
+                )
+
+            # Call 2: Extract structured fields (no tool call, just parsing from context)
+            log.info("Extracting TTO fields via structured_output...")
+            extract_result = fetcher(
+                "Now extract the TTO fields from the work_notes you just retrieved. "
+                "Remember: business_application_ci_id is the numeric 'App CI ID' from "
+                "the work notes, NOT the GEVPRJTASK number.",
+                structured_output_model=TTOFields,
+            )
+            fields: TTOFields = extract_result.structured_output
+
+            # Validate extraction
+            if not fields:
+                raise RuntimeError(
+                    f"Fetcher failed to extract TTOFields for project task "
+                    f"{project_task_number}."
                 )
 
             app_ci = fields.business_application_ci_id
             if not app_ci or app_ci.strip().upper().startswith("GEVPRJTASK"):
                 raise ValueError(
-                    f"Planner produced invalid business_application_ci_id={app_ci!r} "
+                    f"Fetcher produced invalid business_application_ci_id={app_ci!r} "
                     f"for project task {project_task_number}. Expected a numeric "
                     f"CMDB id parsed from the work notes; got the project task "
                     f"number itself or an empty value."
                 )
 
+            # Build task list in pure Python (no LLM involved)
+            log.info("Building task list from templates...")
+            tasks = build_tto_task_list(fields)
+
             workflow_id = f"tto-{app_ci}"
             log.info(
-                "Project Task %s -> extracted (app CI %s); %d tasks for workflow %s",
-                project_task_number, app_ci, len(tasks), workflow_id,
+                "Project Task %s -> extracted (app CI %s, uai %s); %d tasks for workflow %s",
+                project_task_number, app_ci, fields.uai, len(tasks), workflow_id,
             )
 
             runner.tool.workflow(action="create", workflow_id=workflow_id, tasks=tasks)
@@ -341,13 +339,13 @@ def main() -> None:
         a2a_agent = Agent(
             name="TTO Checklist Validator",
             description="Validates a ServiceNow project task's TTO checklist end-to-end.",
-            model=settings.model,
+            model=llm_model,
             system_prompt=A2A_PROMPT,
             tools=[validate_tto_checklist],
         )
 
         log.info(
-            "Agents ready: planner=[servicenow(%d tools), build_tto_task_list — per request], "
+            "Agents ready: fetcher=[servicenow(%d tools) + structured_output — per request], "
             "runner=[%d MCP tools total, workflow], report=[no tools], "
             "a2a=[validate_tto_checklist]. Source tool counts: %s",
             len(servicenow_tools),

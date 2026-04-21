@@ -62,26 +62,51 @@ def build_tto_task_list(fields: TTOFields) -> list[dict]:
 
     Pure Python, called directly from the server after the fetcher returns
     TTOFields. Output is the `tasks=` payload for `workflow(action="create")`.
+    
+    Tasks are skipped if their required fields are missing (None/empty).
     """
     values = {
         "business_application_ci_id": fields.business_application_ci_id,
         "uai": fields.uai,
-        "box_link": fields.box_link or "<missing>",
-        "github_link": fields.github_link or "<missing>",
-        "confluence_link": fields.confluence_link or "<missing>",
-        "application_environment_ci": fields.application_environment_ci or "<missing>",
+        "box_link": fields.box_link,
+        "github_link": fields.github_link,
+        "confluence_link": fields.confluence_link,
+        "application_environment_ci": fields.application_environment_ci,
         "cloud_services_str": (
-            ", ".join(fields.cloud_services) if fields.cloud_services else "<none>"
+            ", ".join(fields.cloud_services) if fields.cloud_services else None
         ),
+    }
+
+    # Map task_id -> required fields (if any field is None, skip the task)
+    required_fields: dict[str, list[str]] = {
+        "verify_app_environment_ci": ["application_environment_ci"],
+        "verify_github_repo": ["github_link"],
+        "verify_confluence_page": ["confluence_link"],
+        # MVP1: Uncomment to enable Box and AWS validation
+        # "verify_box_link": ["box_link"],
+        # "validate_cloud_services": ["cloud_services_str"],
     }
 
     tasks: list[dict] = []
     for tpl in TASK_TEMPLATES:
+        task_id = tpl["task_id"]
+        
+        # Check if required fields are present
+        required = required_fields.get(task_id, [])
+        if any(values.get(field) is None for field in required):
+            continue  # Skip task — required field is missing
+        
+        # Build format values with fallbacks for optional fields
+        format_values = {
+            k: v if v is not None else "<not provided>"
+            for k, v in values.items()
+        }
+        
         tasks.append(
             {
-                "task_id": tpl["task_id"],
-                "description": tpl["description"].format(**values),
-                "system_prompt": tpl["system_prompt"].format(**values),
+                "task_id": task_id,
+                "description": tpl["description"].format(**format_values),
+                "system_prompt": tpl["system_prompt"].format(**format_values),
                 "dependencies": list(tpl.get("dependencies", [])),
                 "priority": tpl.get("priority", 3),
                 "tools": list(tpl.get("tools", [])),

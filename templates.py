@@ -88,24 +88,25 @@ TASK_TEMPLATES: list[dict] = [
             + RESULT_FORMAT
         ),
     },
-    {
-        "task_id": "verify_box_link",
-        "description": "Verify the Box link is reachable and contains handover artifacts.",
-        "dependencies": [],
-        "tools": ["box_list_folder_items"],
-        "priority": 2,
-        "system_prompt": (
-            "You are a TTO verification agent. Verify the Box folder at '{box_link}' "
-            "for project '{business_application_ci_id}'.\n\n"
-            "Tool: box_list_folder_items\n\n"
-            "Steps:\n"
-            "1. Call box_list_folder_items with the folder URL '{box_link}'.\n"
-            "2. Confirm the folder exists and contains handover artifacts "
-            "(runbooks, design docs, or operational notes).\n"
-            "3. Record folder name, item count, and notable filenames as evidence."
-            + RESULT_FORMAT
-        ),
-    },
+    # MVP1: Box verification disabled — uncomment to enable
+    # {
+    #     "task_id": "verify_box_link",
+    #     "description": "Verify the Box link is reachable and contains handover artifacts.",
+    #     "dependencies": [],
+    #     "tools": ["box_list_folder_items"],
+    #     "priority": 2,
+    #     "system_prompt": (
+    #         "You are a TTO verification agent. Verify the Box folder at '{box_link}' "
+    #         "for project '{business_application_ci_id}'.\n\n"
+    #         "Tool: box_list_folder_items\n\n"
+    #         "Steps:\n"
+    #         "1. Call box_list_folder_items with the folder URL '{box_link}'.\n"
+    #         "2. Confirm the folder exists and contains handover artifacts "
+    #         "(runbooks, design docs, or operational notes).\n"
+    #         "3. Record folder name, item count, and notable filenames as evidence."
+    #         + RESULT_FORMAT
+    #     ),
+    # },
     {
         "task_id": "verify_github_repo",
         "description": "Verify the GitHub repository exists and contains Infrastructure-as-Code.",
@@ -142,24 +143,25 @@ TASK_TEMPLATES: list[dict] = [
             + RESULT_FORMAT
         ),
     },
-    {
-        "task_id": "validate_cloud_services",
-        "description": "Validate every cloud service listed in the checklist exists and is tagged correctly in AWS.",
-        "dependencies": ["verify_business_app_ci", "verify_uai"],
-        "tools": ["aws_resource_explorer_search", "aws_get_resource_tags"],
-        "priority": 4,
-        "system_prompt": (
-            "You are a TTO verification agent. Validate the AWS resources backing "
-            "UAI '{uai}' for project '{business_application_ci_id}'.\n"
-            "The checklist declares these cloud services: {cloud_services_str}.\n\n"
-            "Tools: aws_resource_explorer_search, aws_get_resource_tags\n\n"
-            "Steps:\n"
-            "1. Call aws_resource_explorer_search with uai='{uai}' for each declared service.\n"
-            "2. For resources found, call aws_get_resource_tags to verify required tags: "
-            "uai, cost-center, owner, environment.\n"
-            "3. Flag any declared service with no matching resources, and any resource missing required tags.\n"
-            "4. Record counts per service and a sample of resource identifiers as evidence."
-            + RESULT_FORMAT
-        ),
-    },
+    # MVP1: AWS cloud services validation disabled — uncomment to enable
+    # {
+    #     "task_id": "validate_cloud_services",
+    #     "description": "Validate every cloud service listed in the checklist exists and is tagged correctly in AWS.",
+    #     "dependencies": ["verify_business_app_ci", "verify_uai"],
+    #     "tools": ["aws_resource_explorer_search", "aws_get_resource_tags"],
+    #     "priority": 4,
+    #     "system_prompt": (
+    #         "You are a TTO verification agent. Validate the AWS resources backing "
+    #         "UAI '{uai}' for project '{business_application_ci_id}'.\n"
+    #         "The checklist declares these cloud services: {cloud_services_str}.\n\n"
+    #         "Tools: aws_resource_explorer_search, aws_get_resource_tags\n\n"
+    #         "Steps:\n"
+    #         "1. Call aws_resource_explorer_search with uai='{uai}' for each declared service.\n"
+    #         "2. For resources found, call aws_get_resource_tags to verify required tags: "
+    #         "uai, cost-center, owner, environment.\n"
+    #         "3. Flag any declared service with no matching resources, and any resource missing required tags.\n"
+    #         "4. Record counts per service and a sample of resource identifiers as evidence."
+    #         + RESULT_FORMAT
+    #     ),
+    # },
 ]

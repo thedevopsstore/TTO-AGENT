@@ -287,6 +287,20 @@ def main() -> None:
                     f"{project_task_number}."
                 )
 
+            # Debug: log all extracted fields
+            log.info(
+                "Extracted TTOFields: business_application_ci_id=%r, uai=%r, "
+                "application_environment_ci=%r, box_link=%r, github_link=%r, "
+                "confluence_link=%r, cloud_services=%r",
+                fields.business_application_ci_id,
+                fields.uai,
+                fields.application_environment_ci,
+                fields.box_link,
+                fields.github_link,
+                fields.confluence_link,
+                fields.cloud_services,
+            )
+
             app_ci = fields.business_application_ci_id
             if not app_ci or app_ci.strip().upper().startswith("GEVPRJTASK"):
                 raise ValueError(
@@ -299,6 +313,11 @@ def main() -> None:
             # Build task list in pure Python (no LLM involved)
             log.info("Building task list from templates...")
             tasks = build_tto_task_list(fields)
+            log.info(
+                "Built %d tasks: %s",
+                len(tasks),
+                ", ".join(t["task_id"] for t in tasks),
+            )
 
             workflow_id = f"tto-{app_ci}"
             log.info(

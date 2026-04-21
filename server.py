@@ -48,12 +48,17 @@ log = logging.getLogger(__name__)
 
 
 PLANNER_PROMPT = """
-You are the TTO Planner. For the ServiceNow project CI id you are given:
+You are the TTO Planner. You will be given a ServiceNow Project Task number
+(format: 'GEVPRJTASK...........', table `pm_project_task`). The TTO checklist
+lives in that task's **work notes**.
 
-1. Use the ServiceNow MCP tools to locate the project record and read its
-   work notes. You MUST call these tools — do not answer from memory.
+You MUST:
+
+1. Use the ServiceNow MCP tools to look up the Project Task record by its
+   number and read its work notes. Do not answer from memory.
 2. From the work-note text, extract the TTO fields:
-     - business_application_ci_id  (required; from the work note)
+     - business_application_ci_id  (required; the Business Application CI
+       declared in the checklist, NOT the project task number)
      - uai                         (required; e.g. "uai3071168")
      - box_link
      - github_link
@@ -69,9 +74,11 @@ the data — downstream Python builds the task list deterministically.
 
 
 A2A_PROMPT = """
-You are the TTO Checklist Validator. Extract the project CI id from the
-caller's request and call `validate_tto_checklist(project_ci_id=<that id>)`.
-Return its output verbatim.
+You are the TTO Checklist Validator. The caller will ask you to validate the
+TTO checklist for a ServiceNow Project Task (format: 'GEVPRJTASK...........').
+Extract that project task number from the request and call
+`validate_tto_checklist(project_task_number=<that number>)`. Return its
+output verbatim.
 """.strip()
 
 
@@ -162,27 +169,36 @@ def main() -> None:
         )
 
         @tool
-        def validate_tto_checklist(project_ci_id: str) -> dict[str, Any]:
-            """Validate the TTO checklist for a ServiceNow project end-to-end.
+        def validate_tto_checklist(project_task_number: str) -> dict[str, Any]:
+            """Validate the TTO checklist on a ServiceNow Project Task.
 
-            1. Planner LLM fetches the work notes via ServiceNow MCP and returns
-               typed TTOFields (required fields force the tool calls).
-            2. Python calls build_tto_task_list(fields) deterministically.
-            3. Runner drives the workflow tool (create -> start -> poll on disk).
-            4. Compile per-task status + raw state for audit.
+            Args:
+                project_task_number: ServiceNow `pm_project_task` number, e.g.
+                    'GEVPRJTASK0481346'. Its work notes contain the checklist.
+
+            Flow:
+              1. Planner LLM looks up the Project Task in ServiceNow and reads
+                 its work notes (required TTOFields force the tool calls).
+              2. Python calls build_tto_task_list(fields) deterministically.
+              3. Runner drives the workflow tool (create -> start -> poll on disk).
+              4. Compile per-task status + raw state for audit.
             """
             fields = planner.structured_output(
                 TTOFields,
                 (
-                    f"Fetch the ServiceNow project record for CI {project_ci_id}, "
-                    "read its work notes, and extract the TTO fields."
+                    f"Look up ServiceNow Project Task {project_task_number} "
+                    f"(table pm_project_task), read its work notes, and "
+                    f"extract the TTO fields declared in the checklist."
                 ),
             )
             tasks = build_tto_task_list(fields)
             workflow_id = f"tto-{fields.business_application_ci_id}"
             log.info(
-                "Planner extracted fields for CI %s; built %d tasks for workflow %s",
-                fields.business_application_ci_id, len(tasks), workflow_id,
+                "Project Task %s -> fields extracted (app CI %s); built %d tasks for workflow %s",
+                project_task_number,
+                fields.business_application_ci_id,
+                len(tasks),
+                workflow_id,
             )
 
             runner.tool.workflow(action="create", workflow_id=workflow_id, tasks=tasks)

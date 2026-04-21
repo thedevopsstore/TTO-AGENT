@@ -49,27 +49,43 @@ log = logging.getLogger(__name__)
 
 PLANNER_PROMPT = """
 You are the TTO Planner. You will be given a ServiceNow Project Task number
-(format: 'GEVPRJTASK...........', table `pm_project_task`). The TTO checklist
-lives in that task's **work notes**.
+(format: 'GEVPRJTASK...........'). The TTO checklist lives in that task's
+**work notes**.
 
-You MUST:
+STEP 1 — Fetch the record. You MUST call the tool
+`servicenow_project_task_detail` with the given project task number. Do not
+use any other ServiceNow tool for this step, and do not answer from memory.
 
-1. Use the ServiceNow MCP tools to look up the Project Task record by its
-   number and read its work notes. Do not answer from memory.
-2. From the work-note text, extract the TTO fields:
-     - business_application_ci_id  (required; the Business Application CI
-       declared in the checklist, NOT the project task number)
-     - uai                         (required; e.g. "uai3071168")
-     - box_link
-     - github_link
-     - confluence_link
-     - application_environment_ci
-     - cloud_services  (parse a comma-separated list like
-       "ALB, ECR, ECS, Postgres, KMS, S3, IAM" into an array of strings)
-   Optional fields MUST be null when absent, never invented.
+STEP 2 — Parse the work notes. Locate the `work_notes` (or equivalent) field
+in the tool's response. It contains lines like:
 
-Return the extracted TTOFields. Do not plan tasks, summarize, or transform
-the data — downstream Python builds the task list deterministically.
+    App CI ID: 1101672345
+    UAI: uai3071168
+    Box link: https://...
+    Github Link: https://...
+    Confluence link: https://...
+    Application Environment CI: 1101672999
+    Used cloud services: ALB, ECR, ECS, Postgres, KMS, S3, IAM
+
+STEP 3 — Emit TTOFields with the values you parsed:
+
+  - business_application_ci_id  (required) - the "App CI ID" line's value
+    (e.g. "1101672345"). This is a numeric CMDB id found INSIDE the work
+    notes. It is NEVER equal to the project task number you were given
+    (GEVPRJTASK...). If the value you are about to emit starts with
+    "GEVPRJTASK", you have the wrong field — re-parse the work notes.
+  - uai                         (required) - e.g. "uai3071168"
+  - box_link
+  - github_link
+  - confluence_link
+  - application_environment_ci
+  - cloud_services  (parse the comma-separated list into an array of
+    strings, e.g. ["ALB", "ECR", "ECS", "Postgres", "KMS", "S3", "IAM"])
+
+Optional fields MUST be null when the work notes do not contain them —
+never invented, never copied from the project task number.
+
+Do not plan tasks, do not summarize, do not transform. Return TTOFields only.
 """.strip()
 
 
@@ -186,17 +202,30 @@ def main() -> None:
             fields = planner.structured_output(
                 TTOFields,
                 (
-                    f"Look up ServiceNow Project Task {project_task_number} "
-                    f"(table pm_project_task), read its work notes, and "
-                    f"extract the TTO fields declared in the checklist."
+                    f"Call servicenow_project_task_detail with "
+                    f"project_task_number='{project_task_number}', parse the "
+                    f"TTO checklist from the returned work notes, and emit "
+                    f"TTOFields. The business_application_ci_id in your output "
+                    f"MUST come from the 'App CI ID' line in the work notes, "
+                    f"NOT from the project task number."
                 ),
             )
+
+            app_ci = fields.business_application_ci_id
+            if not app_ci or app_ci.strip().upper().startswith("GEVPRJTASK"):
+                raise ValueError(
+                    f"Planner returned invalid business_application_ci_id={app_ci!r} "
+                    f"for project task {project_task_number}. Expected a numeric "
+                    f"CMDB id parsed from the work notes; got the project task "
+                    f"number itself or an empty value."
+                )
+
             tasks = build_tto_task_list(fields)
-            workflow_id = f"tto-{fields.business_application_ci_id}"
+            workflow_id = f"tto-{app_ci}"
             log.info(
                 "Project Task %s -> fields extracted (app CI %s); built %d tasks for workflow %s",
                 project_task_number,
-                fields.business_application_ci_id,
+                app_ci,
                 len(tasks),
                 workflow_id,
             )

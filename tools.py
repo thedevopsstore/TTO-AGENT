@@ -11,8 +11,6 @@ from pydantic import BaseModel, Field
 
 from .templates import TASK_TEMPLATES
 
-REGISTRY: dict[str, list[str]] = {}
-
 
 class TTOFields(BaseModel):
     """Fields extracted from the ServiceNow work note via structured_output.
@@ -60,9 +58,9 @@ class TTOFields(BaseModel):
 
 
 def build_tto_task_list(fields: TTOFields) -> list[dict]:
-    """Expand TASK_TEMPLATES with extracted values + registry tool names.
+    """Expand TASK_TEMPLATES with extracted values.
 
-    Pure Python, called directly from the server after the planner returns
+    Pure Python, called directly from the server after the fetcher returns
     TTOFields. Output is the `tasks=` payload for `workflow(action="create")`.
     """
     values = {
@@ -79,10 +77,6 @@ def build_tto_task_list(fields: TTOFields) -> list[dict]:
 
     tasks: list[dict] = []
     for tpl in TASK_TEMPLATES:
-        tool_names: list[str] = []
-        for source in tpl["tool_sources"]:
-            tool_names.extend(REGISTRY.get(source, []))
-
         tasks.append(
             {
                 "task_id": tpl["task_id"],
@@ -90,7 +84,7 @@ def build_tto_task_list(fields: TTOFields) -> list[dict]:
                 "system_prompt": tpl["system_prompt"].format(**values),
                 "dependencies": list(tpl.get("dependencies", [])),
                 "priority": tpl.get("priority", 3),
-                "tools": tool_names,
+                "tools": list(tpl.get("tools", [])),
             }
         )
     return tasks

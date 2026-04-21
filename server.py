@@ -47,7 +47,6 @@ from strands import Agent, tool
 from strands.multiagent.a2a import A2AServer
 from strands_tools import workflow
 
-from . import tools as tools_module
 from .mcp_sessions import open_sessions
 from .settings import Settings
 from .tools import TTOFields, build_tto_task_list
@@ -205,8 +204,7 @@ def main() -> None:
     )
 
     with ExitStack() as stack:
-        tools_by_source, registry = open_sessions(settings, stack)
-        tools_module.REGISTRY = registry
+        tools_by_source, _ = open_sessions(settings, stack)
 
         if not tools_by_source.get("servicenow"):
             raise RuntimeError("ServiceNow MCP is required but has no tools available.")
@@ -350,7 +348,7 @@ def main() -> None:
             "a2a=[validate_tto_checklist]. Source tool counts: %s",
             len(servicenow_tools),
             len(all_mcp_tools),
-            ", ".join(f"{s}={len(n)}" for s, n in registry.items()),
+            ", ".join(f"{s}={len(tools)}" for s, tools in tools_by_source.items()),
         )
         log.info("Serving A2A on %s:%d", settings.host, settings.port)
         A2AServer(agent=a2a_agent, host=settings.host, port=settings.port).serve()

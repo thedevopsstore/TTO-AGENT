@@ -1,8 +1,8 @@
-"""A2A server entrypoint: specialist agents chained via Python.
+"""AG-UI server entrypoint: specialist agents chained via Python.
 
 Architecture:
 
-    A2A Agent (one skill)  ->  validate_tto_checklist(project_task_number)
+    AG-UI Agent (one skill) ->  validate_tto_checklist(project_task_number)
                                    |
                                    +-- Fetcher Agent (LLM, two calls)
                                    |       tools = [servicenow_mcp_tools]
@@ -22,6 +22,13 @@ Architecture:
                                            tools = []
                                            turns the raw per-task results
                                            into a human-readable markdown report
+
+Transport:
+
+The outer Strands Agent is wrapped by `ag_ui_strands.StrandsAgent` and mounted
+on a FastAPI app at `POST /invocations` (SSE stream of AG-UI events) with a
+`GET /ping` health check. This is the layout expected by Bedrock AgentCore
+Runtime for AG-UI containers and by any CopilotKit / AG-UI client.
 
 Key design:
 - Fetcher uses two LLM calls: first with tools to fetch, second with
@@ -43,8 +50,10 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
+import uvicorn
+from ag_ui_strands import StrandsAgent, create_strands_app
+
 from strands import Agent, tool
-from strands.multiagent.a2a import A2AServer
 from strands_tools import workflow
 
 from .mcp_sessions import open_sessions
@@ -121,12 +130,15 @@ Rules:
 """.strip()
 
 
-A2A_PROMPT = """
-You are the TTO Checklist Validator. The caller will ask you to validate the
+AGUI_PROMPT = """
+You are the TTO Checklist Validator. The user will ask you to validate the
 TTO checklist for a ServiceNow Project Task (format: 'GEVPRJTASK...........').
 Extract that project task number from the request and call
-`validate_tto_checklist(project_task_number=<that number>)`. Return its
-output verbatim.
+`validate_tto_checklist(project_task_number=<that number>)`.
+
+When the tool returns, present the markdown `report` field to the user as
+your final answer. Do not repeat the raw per-task JSON unless the user
+explicitly asks for it.
 """.strip()
 
 
@@ -311,6 +323,7 @@ def main() -> None:
                 )
 
             # Build task list in pure Python (no LLM involved)
+            # Build task list in pure Python (no LLM involved)
             log.info("Building task list from templates...")
             tasks = build_tto_task_list(fields)
             log.info(
@@ -353,24 +366,39 @@ def main() -> None:
                 "raw_state": state,
             }
 
-        a2a_agent = Agent(
+        # Template Strands agent the AG-UI adapter clones per thread.
+        tto_agent = Agent(
             name="TTO Checklist Validator",
             description="Validates a ServiceNow project task's TTO checklist end-to-end.",
             model=llm_model,
-            system_prompt=A2A_PROMPT,
+            system_prompt=AGUI_PROMPT,
             tools=[validate_tto_checklist],
         )
+
+        # Wrap the Strands agent with the AG-UI adapter. The adapter keeps one
+        # agent instance per AG-UI thread_id so multi-turn conversations work
+        # without leaking state between users.
+        agui_agent = StrandsAgent(
+            agent=tto_agent,
+            name=settings.agent_id,
+            description="Validates a ServiceNow project task's TTO checklist end-to-end.",
+        )
+
+        app = create_strands_app(agui_agent, settings.agent_path, "/ping")
 
         log.info(
             "Agents ready: fetcher=[servicenow(%d tools) + structured_output — per request], "
             "runner=[%d MCP tools total, workflow], report=[no tools], "
-            "a2a=[validate_tto_checklist]. Source tool counts: %s",
+            "ag-ui=[validate_tto_checklist]. Source tool counts: %s",
             len(servicenow_tools),
             len(all_mcp_tools),
             ", ".join(f"{s}={len(tools)}" for s, tools in tools_by_source.items()),
         )
-        log.info("Serving A2A on %s:%d", settings.host, settings.port)
-        A2AServer(agent=a2a_agent, host=settings.host, port=settings.port).serve()
+        log.info(
+            "Serving AG-UI on %s:%d (POST %s, GET /ping), agent_id=%s",
+            settings.host, settings.port, settings.agent_path, settings.agent_id,
+        )
+        uvicorn.run(app, host=settings.host, port=settings.port, log_config=None)
 
 
 if __name__ == "__main__":

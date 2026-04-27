@@ -109,6 +109,10 @@ When guiding, be specific: name the exact tool, action, and argument values
 the agent should use (taken from prior tool outputs in the ledger).
 
 Use the ledger in your context to determine exactly which steps are done.
+
+CRITICAL: The agent must ONLY report on tasks that were executed in the workflow.
+If the ledger shows build_task_list returned N tasks and workflow(create) registered N tasks,
+the final report must have exactly N task results, no more, no less.
 """.strip()
 
 
@@ -149,16 +153,39 @@ Step 5 — START WORKFLOW
 Step 6 — CHECK STATUS AND REPORT
   Call: workflow(action="status", workflow_id=<same id>)
   
+  CRITICAL REPORTING RULES:
+  • ONLY report on tasks that were ACTUALLY EXECUTED in the workflow
+  • DO NOT invent, assume, or hallucinate other TTO checklist items
+  • Use ONLY the task results from workflow(action="status") output
+  • The posture count MUST match the exact number of tasks that ran
+  • If a task was skipped (e.g., missing box_link), DO NOT include it in the report
+  
   Then generate a professional markdown report with:
   1. Header: project task number, business application CI, workflow id, and posture summary
-     (e.g., "Posture: 5 PASS, 1 NEEDS_REVIEW, 0 FAIL, 0 MISSING — 6 checks total")
-  2. Checklist section: one subsection per task_id showing Status, Evidence, and Notes
-  3. Actions required: bullet list of FAIL or NEEDS_REVIEW items with remediation steps
+     Example: "Posture: 3 PASS, 1 NEEDS_REVIEW, 0 FAIL, 0 MISSING — 4 checks total"
+     The count (4 in this example) MUST equal the number of tasks that actually ran.
+  
+  2. Checklist section: ONLY include tasks that were executed in the workflow.
+     For each executed task, show:
+     - Task ID (from workflow results)
+     - Status (PASS / FAIL / NEEDS_REVIEW / MISSING)
+     - Evidence (bullet list from the task's result)
+     - Notes (one-line rationale from the task's result)
+     
+     DO NOT add tasks that were not in the workflow execution.
+  
+  3. Actions required: bullet list of FAIL or NEEDS_REVIEW items with remediation steps.
+     Base this ONLY on the tasks that were executed.
   
   Present this report to the user as your final answer.
 
 Always complete all six steps. If a step fails, explain why and retry or recover.
 The steering system will guide you if you try to skip steps or execute them out of order.
+
+IMPORTANT: When generating the final report, use ONLY the actual workflow results.
+Do not invent or include checklist items that were not executed. Some tasks may be
+skipped if optional fields are missing (e.g., box_link, cloud_services). This is
+expected behavior. Report only what actually ran.
 """.strip()
 
 
@@ -216,13 +243,20 @@ def main() -> None:
             extracted TTOFields into the task list format required by the
             workflow tool.
             
+            IMPORTANT: Some tasks may be skipped if required fields are missing
+            (e.g., if box_link is null, verify_box_link is not created).
+            Only tasks with all required fields will be included.
+            
             Args:
                 fields_json: JSON string of TTOFields (from structured_output extraction)
                 
             Returns:
                 {
-                  "workflow_id": str,  # e.g., "tto-1101672345"
-                  "tasks": list,       # workflow-tool format tasks
+                  "workflow_id": str,        # e.g., "tto-1101672345"
+                  "tasks": list,             # workflow-tool format tasks (only tasks with required fields)
+                  "task_count": int,         # number of tasks created
+                  "task_ids": list[str],     # list of task_id strings
+                  "message": str,            # reminder to report ONLY on these tasks
                 }
             """
             try:
@@ -243,16 +277,25 @@ def main() -> None:
             tasks = _build_tto_task_list(fields)
             workflow_id = f"tto-{app_ci}"
             
+            task_ids = [t["task_id"] for t in tasks]
+            
             log.info(
                 "Built %d tasks for workflow %s: %s",
                 len(tasks),
                 workflow_id,
-                ", ".join(t["task_id"] for t in tasks),
+                ", ".join(task_ids),
             )
             
             return {
                 "workflow_id": workflow_id,
                 "tasks": tasks,
+                "task_count": len(tasks),
+                "task_ids": task_ids,
+                "message": (
+                    f"Created {len(tasks)} workflow tasks: {', '.join(task_ids)}. "
+                    f"IMPORTANT: Only these {len(tasks)} tasks will be executed. "
+                    f"Report ONLY on these tasks in your final report, no others."
+                ),
             }
 
         # Create the steered TTO workflow agent.

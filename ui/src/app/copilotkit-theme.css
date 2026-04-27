@@ -1,0 +1,59 @@
+/**
+ * GE Vernova–inspired dark theme (navy / electric blue / green accent, white text).
+ * CopilotKit reads design tokens from [data-copilotkit] — see @copilotkit/react-core v2 globals.
+ */
+html.dark [data-copilotkit],
+html.dark [data-copilotkit].dark {
+  /* Deep navy-black surfaces (closer to energy / corporate hero sections) */
+  --background: oklch(0.19 0.045 258);
+  --foreground: oklch(0.98 0.01 258);
+  --card: oklch(0.22 0.05 258);
+  --card-foreground: oklch(0.98 0.01 258);
+  --popover: oklch(0.23 0.05 258);
+  --popover-foreground: oklch(0.98 0.01 258);
+
+  /* Electric blue primary (CTA / focus — not the site’s exact hex, but same family) */
+  --primary: oklch(0.58 0.18 245);
+  --primary-foreground: oklch(0.99 0 0);
+
+  --secondary: oklch(0.28 0.06 258);
+  --secondary-foreground: oklch(0.96 0.02 258);
+  --muted: oklch(0.3 0.05 258);
+  --muted-foreground: oklch(0.72 0.03 258);
+
+  /* Green accent (sustainability / “energy” secondary) */
+  --accent: oklch(0.32 0.08 165);
+  --accent-foreground: oklch(0.95 0.04 165);
+
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.98 0.01 258);
+  --border: oklch(0.34 0.06 258);
+  --input: oklch(0.3 0.05 258);
+  --ring: oklch(0.58 0.18 245);
+
+  --chart-1: oklch(0.58 0.18 245);
+  --chart-2: oklch(0.72 0.17 155);
+  --chart-3: oklch(0.65 0.14 200);
+  --chart-4: oklch(0.7 0.12 280);
+  --chart-5: oklch(0.78 0.14 95);
+
+  --sidebar: oklch(0.2 0.05 258);
+  --sidebar-foreground: oklch(0.98 0.01 258);
+  --sidebar-primary: oklch(0.58 0.18 245);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.3 0.07 165);
+  --sidebar-accent-foreground: oklch(0.96 0.04 165);
+  --sidebar-border: oklch(0.34 0.06 258);
+  --sidebar-ring: oklch(0.58 0.18 245);
+}
+
+/* Scrollbar thumb — blue-gray to match UI */
+html.dark [data-copilotkit] ::-webkit-scrollbar-thumb {
+  background: oklch(0.42 0.08 258);
+}
+html.dark [data-copilotkit] ::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.52 0.12 245);
+}
+html.dark [data-copilotkit] * {
+  scrollbar-color: oklch(0.42 0.08 258) transparent;
+}

@@ -1,6 +1,5 @@
 "use client";
 
-import "@copilotkit/react-core/v2/styles.css";
 import { CopilotKit } from "@copilotkit/react-core";
 import { CopilotChat } from "@copilotkit/react-core/v2";
 
@@ -20,10 +19,25 @@ export default function Home() {
           padding: "24px",
         }}
       >
-        <div style={{ width: "100%", maxWidth: "1100px", height: "90vh" }}>
+        <div
+          style={{
+            width: "100%",
+            maxWidth: "1100px",
+            height: "90vh",
+            borderRadius: "16px",
+            border: "1px solid var(--surface-border, rgba(0, 180, 216, 0.25))",
+            boxShadow:
+              "0 0 0 1px rgba(0, 0, 0, 0.35), 0 24px 48px rgba(0, 0, 0, 0.45)",
+            overflow: "hidden",
+          }}
+        >
           <CopilotChat
             agentId={agentId}
             className="h-full rounded-2xl max-w-6xl mx-auto"
+            labels={{
+              welcomeMessageText:
+                "Hey — I’m here to help you with TTO checklist validation.",
+            }}
           />
         </div>
       </main>

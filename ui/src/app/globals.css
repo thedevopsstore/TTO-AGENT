@@ -1,13 +1,8 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Page shell (outside CopilotKit); dark by default to match Vernova-style UI */
+  --background: #050a12;
+  --foreground: #f4f7fb;
+  --surface-border: rgba(0, 180, 216, 0.25);
 }
 
 html {
@@ -25,8 +20,13 @@ body {
   display: flex;
   flex-direction: column;
   color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background: radial-gradient(
+      120% 80% at 50% -20%,
+      oklch(0.28 0.12 245) 0%,
+      transparent 55%
+    ),
+    linear-gradient(180deg, #050a12 0%, #020508 45%, #03060d 100%);
+  font-family: var(--font-inter, system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -42,8 +42,6 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+html {
+  color-scheme: dark;
 }

@@ -1,15 +1,14 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
+import "@copilotkit/react-core/v2/styles.css";
 import "./globals.css";
+import "./copilotkit-theme.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+/** Clean corporate sans — in the same spirit as large energy / B2B marketing sites */
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -23,8 +22,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+    <html lang="en" className={`dark ${inter.variable}`}>
+      <body className={inter.className}>{children}</body>
     </html>
   );
 }

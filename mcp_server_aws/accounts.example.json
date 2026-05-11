@@ -1,0 +1,11 @@
+{
+  "111122223333": {
+    "role_arn": "arn:aws:iam::111122223333:role/McpExecutionRole",
+    "source_profile": "org-admin",
+    "external_id": "optional-external-id"
+  },
+  "444455556666": {
+    "role_arn": "arn:aws:iam::444455556666:role/McpExecutionRole",
+    "source_profile": "org-admin"
+  }
+}

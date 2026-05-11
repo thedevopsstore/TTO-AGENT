@@ -6,11 +6,11 @@ import re
 from typing import Any
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from .config import Settings
 from .credentials import StsCredentialManager
-from .upstream import call_upstream_tool
+from .upstream import call_upstream_tool, list_upstream_tools
 
 log = logging.getLogger(__name__)
 
@@ -64,12 +64,16 @@ class AccountRoutingMiddleware(Middleware):
         self._credentials = credentials
 
     async def on_list_tools(self, context: MiddlewareContext, call_next) -> Any:
-        result = await call_next(context)
-        result.tools = [_inject_account_id(t) for t in result.tools]
-        return result
+        tools = await list_upstream_tools(self._settings)
+        return ListToolsResult(tools=[_inject_account_id(t) for t in tools])
 
     async def on_call_tool(self, context: MiddlewareContext, call_next) -> Any:
         args = dict(context.message.arguments or {})
+
+        if self._settings.local_deployment:
+            log.info("local_deployment: bypassing STS for tool=%s", context.message.name)
+            return await call_upstream_tool(self._settings, None, context.message.name, args)
+
         account_id = args.pop(ACCOUNT_ID, None)
 
         if not account_id:

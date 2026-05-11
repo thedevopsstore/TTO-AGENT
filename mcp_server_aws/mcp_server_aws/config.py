@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     aws_mcp_service: str | None = None  # None = inferred from URL
     aws_role_name: str = "McpExecutionRole"
     aws_bootstrap_profile: str | None = None  # for local dev; uses instance role if unset
+    local_deployment: bool = False  # skip STS; use default credential chain for all calls
     sts_refresh_window_seconds: int = 300
     wrapper_host: str = "0.0.0.0"
     wrapper_port: int = 8000

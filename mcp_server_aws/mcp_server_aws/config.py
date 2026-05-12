@@ -8,11 +8,11 @@ class Settings(BaseSettings):
 
     aws_mcp_endpoint: str
     aws_mcp_region: str = "us-east-1"
-    aws_mcp_service: str | None = None  # None = inferred from URL
+    aws_mcp_service: str = "aws-mcp"  # SigV4 service name; inferred from endpoint URL
     aws_role_name: str = "McpExecutionRole"
     aws_bootstrap_profile: str | None = None  # for local dev; uses instance role if unset
     local_deployment: bool = False  # skip STS; use default credential chain for all calls
-    sts_refresh_window_seconds: int = 300
+    ssl_verify: str = "true"  # "true", "false", or path to CA bundle (for corporate proxies)
     wrapper_host: str = "0.0.0.0"
     wrapper_port: int = 8000
     wrapper_log_level: str = "INFO"

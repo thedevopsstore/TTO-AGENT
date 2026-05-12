@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from fastmcp import FastMCP
+from fastmcp.client.transports import StdioTransport
+from fastmcp.server import create_proxy
 
 from .config import Settings
 from .credentials import StsCredentialManager
@@ -15,13 +16,24 @@ def main() -> None:
         level=s.wrapper_log_level,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
-    creds = StsCredentialManager(
-        role_name=s.aws_role_name,
-        refresh_window_seconds=s.sts_refresh_window_seconds,
+
+    args = [
+        "mcp-proxy-for-aws@latest",
+        s.aws_mcp_endpoint,
+        "--region", s.aws_mcp_region,
+        "--log-level", s.wrapper_log_level,
+    ]
+    if s.aws_bootstrap_profile:
+        args += ["--profile", s.aws_bootstrap_profile]
+
+    server = create_proxy(
+        StdioTransport(command="uvx", args=args, keep_alive=True),
+        name="aws-mcp-wrapper",
     )
-    server = FastMCP("aws-mcp-wrapper")
+
+    creds = StsCredentialManager(role_name=s.aws_role_name)
     server.add_middleware(AccountRoutingMiddleware(s, creds))
-    server.run(transport="streamable-http", host=s.wrapper_host, port=s.wrapper_port, stateless_http=True)
+    server.run(transport="streamable-http", host=s.wrapper_host, port=s.wrapper_port)
 
 
 if __name__ == "__main__":

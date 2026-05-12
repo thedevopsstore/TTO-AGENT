@@ -3,14 +3,16 @@ from __future__ import annotations
 import copy
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any
 
+from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+from fastmcp.tools.base import Tool, ToolResult
 
 from .config import Settings
 from .credentials import StsCredentialManager
-from .upstream import call_upstream_tool, list_upstream_tools
+from .upstream import call_upstream_tool
 
 log = logging.getLogger(__name__)
 
@@ -25,8 +27,8 @@ _ACCOUNT_ID_SCHEMA = {
 
 
 def _inject_account_id(tool: Tool) -> Tool:
-    """Return a copy of tool with account_id prepended to its input schema. Idempotent."""
-    schema = copy.deepcopy(tool.inputSchema or {"type": "object", "properties": {}})
+    """Return a copy of ProxyTool with account_id prepended to its parameters schema. Idempotent."""
+    schema = copy.deepcopy(tool.parameters or {"type": "object", "properties": {}})
     props: dict = schema.setdefault("properties", {})
     required: list = schema.setdefault("required", [])
 
@@ -37,16 +39,7 @@ def _inject_account_id(tool: Tool) -> Tool:
     if ACCOUNT_ID not in required:
         required.insert(0, ACCOUNT_ID)
 
-    patched = copy.copy(tool)
-    patched.inputSchema = schema
-    return patched
-
-
-def _error_result(msg: str) -> CallToolResult:
-    return CallToolResult(
-        content=[TextContent(type="text", text=f"ERROR: {msg}")],
-        isError=True,
-    )
+    return tool.model_copy(update={"parameters": schema})
 
 
 def _maybe_invalidate(exc: Exception, account_id: str, creds: StsCredentialManager) -> None:
@@ -63,35 +56,38 @@ class AccountRoutingMiddleware(Middleware):
         self._settings = settings
         self._credentials = credentials
 
-    async def on_list_tools(self, context: MiddlewareContext, call_next) -> Any:
-        tools = await list_upstream_tools(self._settings)
-        return ListToolsResult(tools=[_inject_account_id(t) for t in tools])
+    async def on_list_tools(
+        self, context: MiddlewareContext, call_next: Any
+    ) -> Sequence[Tool]:
+        tools = await call_next(context)
+        return [_inject_account_id(t) for t in tools]
 
-    async def on_call_tool(self, context: MiddlewareContext, call_next) -> Any:
+    async def on_call_tool(
+        self, context: MiddlewareContext, call_next: Any
+    ) -> ToolResult:
         args = dict(context.message.arguments or {})
+        account_id = args.pop(ACCOUNT_ID, None)
 
         if self._settings.local_deployment:
             log.info("local_deployment: bypassing STS for tool=%s", context.message.name)
             return await call_upstream_tool(self._settings, None, context.message.name, args)
 
-        account_id = args.pop(ACCOUNT_ID, None)
-
         if not account_id:
-            return _error_result(f"Missing required argument: {ACCOUNT_ID}")
+            raise ToolError(f"Missing required argument: {ACCOUNT_ID}")
 
         if not _ACCOUNT_ID_RE.match(str(account_id)):
-            return _error_result(f"Invalid account_id format: must be 12 digits, got {account_id!r}")
+            raise ToolError(f"Invalid account_id format: must be 12 digits, got {account_id!r}")
 
         try:
             creds = await self._credentials.get(str(account_id))
         except (ValueError, RuntimeError) as exc:
             log.error("credential fetch failed: %s", exc)
-            return _error_result(f"Credential error: {exc}")
+            raise ToolError(f"Credential error: {exc}") from exc
 
         log.info("routing tool=%s account_id=%s", context.message.name, account_id)
         try:
             return await call_upstream_tool(self._settings, creds, context.message.name, args)
         except Exception as exc:
             log.exception("upstream call failed for tool %r on account %s", context.message.name, account_id)
-            _maybe_invalidate(exc, account_id, self._credentials)
-            return _error_result(f"Upstream error: {exc}")
+            _maybe_invalidate(exc, str(account_id), self._credentials)
+            raise ToolError(f"Upstream error: {exc}") from exc
